@@ -8,6 +8,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from tensorflow.keras.losses import MeanSquaredError, MeanAbsoluteError
 import io
 import plotly.graph_objects as go
+
 # =======================
 # Page Setup
 # =======================
@@ -54,7 +55,7 @@ st.sidebar.success("✅ All models loaded successfully!")
 field_options = ["RHO", "U", "V", "P"]
 field_to_analyze = st.sidebar.selectbox("Field to Analyze", field_options, index=0)
 
-# Map field → index inside [RHO, U, V, P]
+# Map field → index inside [RHO, U, V, P] (if needed later)
 field_idx = {"RHO": 0, "U": 1, "V": 2, "P": 3}
 
 # =======================
@@ -146,6 +147,14 @@ if uploaded:
         Y_scaled, scaler
     )
 
+    # Coordinates for plotting (store ALL true fields)
+    coords = df_file.iloc[idx_seq][["X", "Y"]].copy()
+    coords["True_RHO"] = rho_true_all
+    coords["True_U"]   = u_true_all
+    coords["True_V"]   = v_true_all
+    coords["True_P"]   = p_true_all
+
+    # The specific field to analyze numerically/visually
     field_true_map = {
         "RHO": rho_true_all,
         "U":   u_true_all,
@@ -153,11 +162,9 @@ if uploaded:
         "P":   p_true_all
     }
     y_true = field_true_map[field_to_analyze]
-
-    # Coordinates for plotting
-    coords = df_file.iloc[idx_seq][["X", "Y"]].copy()
     coords["True_" + field_to_analyze] = y_true
 
+    # Meshgrid
     xi = np.sort(coords["X"].unique())
     yi = np.sort(coords["Y"].unique())
     Xi, Yi = np.meshgrid(xi, yi)
@@ -177,6 +184,18 @@ if uploaded:
         Y_pred_scaled = model.predict(X_inputs[name])
         rho_p, u_p, v_p, p_p = inverse_fields_from_scaled(Y_pred_scaled, scaler)
 
+        # Store predictions for ALL fields (for later diagnostics)
+        coords[f"{name}_pred_RHO"] = rho_p
+        coords[f"{name}_pred_U"]   = u_p
+        coords[f"{name}_pred_V"]   = v_p
+        coords[f"{name}_pred_P"]   = p_p
+
+        coords[f"{name}_err_RHO"]  = rho_true_all - rho_p
+        coords[f"{name}_err_U"]    = u_true_all - u_p
+        coords[f"{name}_err_V"]    = v_true_all - v_p
+        coords[f"{name}_err_P"]    = p_true_all - p_p
+
+        # Field to analyze for this loop
         field_pred_map = {
             "RHO": rho_p,
             "U":   u_p,
@@ -303,70 +322,88 @@ if uploaded:
         "text/csv"
     )
 
-# ----------------------------------------------------
-# ERROR HISTOGRAMS
-# ----------------------------------------------------
-st.subheader(f"📉 Error Histogram – {field_to_analyze}")
+    # ----------------------------------------------------
+    # DETAILED DIAGNOSTICS: select model for error plots
+    # ----------------------------------------------------
+    st.sidebar.markdown("---")
+    selected_model = st.sidebar.selectbox(
+        "Select model for detailed error plots",
+        list(models.keys()),
+        index=0
+    )
 
-fig_h, ax_h = plt.subplots(1, 2, figsize=(16, 6))
+    st.subheader(f"📉 Error Histogram – {field_to_analyze} | Model: {selected_model}")
 
-# Absolute Errors
-ax_h[0].hist((y_true - y_pred), bins=50, color="steelblue")
-ax_h[0].set_title(f"Absolute Error Histogram ({field_to_analyze})")
-ax_h[0].set_xlabel("Absolute Error")
-ax_h[0].set_ylabel("Frequency")
+    # Extract true & pred for selected model and field
+    y_true_diag = coords["True_" + field_to_analyze].values
+    y_pred_diag = coords[f"{selected_model}_pred_{field_to_analyze}"].values
 
-# Relative Errors
-rel_error = ((y_true - y_pred) / (y_true + 1e-6))
-ax_h[1].hist(rel_error, bins=50, color="tomato")
-ax_h[1].set_title(f"Relative Error Histogram ({field_to_analyze})")
-ax_h[1].set_xlabel("Relative Error")
-ax_h[1].set_ylabel("Frequency")
+    fig_h, ax_h = plt.subplots(1, 2, figsize=(16, 6))
 
-st.pyplot(fig_h)
+    # Absolute Errors
+    abs_err = y_true_diag - y_pred_diag
+    ax_h[0].hist(abs_err, bins=50, color="steelblue")
+    ax_h[0].set_title(f"Absolute Error Histogram ({field_to_analyze})")
+    ax_h[0].set_xlabel("Absolute Error")
+    ax_h[0].set_ylabel("Frequency")
 
-# ----------------------------------------------------
-# PARITY PLOT
-# ----------------------------------------------------
-st.subheader(f"📌 Parity Plot – True vs Predicted ({field_to_analyze})")
+    # Relative Errors
+    rel_error = abs_err / (y_true_diag + 1e-6)
+    ax_h[1].hist(rel_error, bins=50, color="tomato")
+    ax_h[1].set_title(f"Relative Error Histogram ({field_to_analyze})")
+    ax_h[1].set_xlabel("Relative Error")
+    ax_h[1].set_ylabel("Frequency")
 
-fig_p, ax_p = plt.subplots(figsize=(7, 7))
+    st.pyplot(fig_h)
 
-ax_p.scatter(y_true, y_pred, s=8, alpha=0.5, color="purple")
-ax_p.plot([y_true.min(), y_true.max()],
-          [y_true.min(), y_true.max()],
-          'r--', linewidth=2)
+    # ----------------------------------------------------
+    # PARITY PLOT
+    # ----------------------------------------------------
+    st.subheader(f"📌 Parity Plot – True vs Predicted ({field_to_analyze}) | Model: {selected_model}")
 
-ax_p.set_xlabel("True Values")
-ax_p.set_ylabel("Predicted Values")
-ax_p.set_title(f"Parity Plot – {field_to_analyze}")
+    fig_p, ax_p = plt.subplots(figsize=(7, 7))
 
-st.pyplot(fig_p)
+    ax_p.scatter(y_true_diag, y_pred_diag, s=8, alpha=0.5, color="purple")
+    min_v = min(y_true_diag.min(), y_pred_diag.min())
+    max_v = max(y_true_diag.max(), y_pred_diag.max())
+    ax_p.plot([min_v, max_v],
+              [min_v, max_v],
+              'r--', linewidth=2)
 
+    ax_p.set_xlabel("True Values")
+    ax_p.set_ylabel("Predicted Values")
+    ax_p.set_title(f"Parity Plot – {field_to_analyze} – {selected_model}")
 
-# ----------------------------------------------------
-# STREAMLINES (U-V Velocity Field)
-# ----------------------------------------------------
-if field_to_analyze in ["U", "V"]:
-    st.subheader("🌪 Streamlines – Velocity Field Comparison")
+    st.pyplot(fig_p)
 
-    # Build 2D fields
-    ZU_true = coords.pivot(index="Y", columns="X", values="True_U").values
-    ZV_true = coords.pivot(index="Y", columns="X", values="True_V").values
+    # ----------------------------------------------------
+    # STREAMLINES (U-V Velocity Field) FOR SELECTED MODEL
+    # ----------------------------------------------------
+    if field_to_analyze in ["U", "V"]:
+        st.subheader(f"🌪 Streamlines – Velocity Field Comparison | Model: {selected_model}")
 
-    ZU_pred = coords.pivot(index="Y", columns="X", values=f"{name}_pred_U").values
-    ZV_pred = coords.pivot(index="Y", columns="X", values=f"{name}_pred_V").values
+        # Build 2D fields (true)
+        ZU_true = coords.pivot(index="Y", columns="X", values="True_U").values
+        ZV_true = coords.pivot(index="Y", columns="X", values="True_V").values
 
-    fig_s, axes_s = plt.subplots(1, 2, figsize=(18, 7))
+        # Predicted U,V for selected model
+        ZU_pred = coords.pivot(index="Y", columns="X",
+                               values=f"{selected_model}_pred_U").values
+        ZV_pred = coords.pivot(index="Y", columns="X",
+                               values=f"{selected_model}_pred_V").values
 
-    # True streamlines
-    axes_s[0].streamplot(Xi, Yi, ZU_true, ZV_true, color="black", density=1.5)
-    axes_s[0].set_title("True Streamlines")
+        fig_s, axes_s = plt.subplots(1, 2, figsize=(18, 7))
 
-    # Pred streamlines
-    axes_s[1].streamplot(Xi, Yi, ZU_pred, ZV_pred, color="blue", density=1.5)
-    axes_s[1].set_title("Predicted Streamlines")
+        # True streamlines
+        axes_s[0].streamplot(Xi, Yi, ZU_true, ZV_true, color="black", density=1.5)
+        axes_s[0].set_title("True Streamlines")
 
-    st.pyplot(fig_s)
+        # Pred streamlines
+        axes_s[1].streamplot(Xi, Yi, ZU_pred, ZV_pred, color="blue", density=1.5)
+        axes_s[1].set_title("Predicted Streamlines")
 
+        for ax_s in axes_s:
+            ax_s.set_xlabel("X")
+            ax_s.set_ylabel("Y")
 
+        st.pyplot(fig_s)
