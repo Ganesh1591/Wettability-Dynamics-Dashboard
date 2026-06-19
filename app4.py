@@ -9,17 +9,13 @@ from tensorflow.keras.losses import MeanSquaredError, MeanAbsoluteError
 import io
 import plotly.graph_objects as go
 
-# =======================
-# Page Setup
-# =======================
 st.set_page_config(
     layout="wide",
-    page_title="Multi-Model, Multi-Field RHO/U/V/P Dashboard"
+    page_title="Multi-Model, Multi-Field RHO/U/V/P Prediction using LST-Nets"
 )
 
-# =======================
-# Safe Model Loader
-# =======================
+# Load Data
+
 def load_model_safe(path):
     return tf.keras.models.load_model(
         path,
@@ -55,12 +51,9 @@ st.sidebar.success("✅ All models loaded successfully!")
 field_options = ["RHO", "U", "V", "P"]
 field_to_analyze = st.sidebar.selectbox("Field to Analyze", field_options, index=0)
 
-# Map field → index inside [RHO, U, V, P] (if needed later)
+# Map field : index inside [RHO, U, V, P] 
 field_idx = {"RHO": 0, "U": 1, "V": 2, "P": 3}
 
-# =======================
-# Data Helpers
-# =======================
 def load_gads_file_from_bytes(uploaded_file):
     """Read Gads_*.dat file with 6 columns: X Y RHO U V P"""
     df = pd.read_csv(uploaded_file, sep=r"\s+", header=None, skiprows=2)
@@ -81,11 +74,6 @@ def create_sequences(data_scaled, n_past, n_future, target_cols_slice=slice(2, 6
     return np.array(X), np.array(Y), np.array(idx)
 
 def inverse_fields_from_scaled(scaled_Y, scaler, n_features=6):
-    """
-    scaled_Y: (N, 4) in scaled space: [RHO, U, V, P]
-    scaler: StandardScaler fitted on all 6 features [X, Y, RHO, U, V, P]
-    Returns 4 arrays of length N: RHO, U, V, P in original units.
-    """
     N = scaled_Y.shape[0]
     dummy = np.zeros((N, n_features))
     dummy[:, 2:6] = scaled_Y
@@ -99,21 +87,17 @@ def contour_plot(ax, Xi, Yi, Z, title, cmap="jet"):
     ax.set_ylabel("Y")
     return c
 
-# =======================
 # MAIN UI
-# =======================
-st.title("📌 Multi-Model, Multi-Field Prediction Dashboard")
+
+st.title("Multi-Model, Multi-Field Prediction of Droplet Spreading Dynamics")
 st.write(
     "Upload a **Gads_*.dat** file. All 5 models will predict "
     "**RHO, U, V, P**, and you can compare them for any one field at a time."
 )
 
-uploaded = st.file_uploader("📤 Upload Gads DAT File", type=["dat"])
+uploaded = st.file_uploader("Upload Gads DAT File", type=["dat"])
 
 if uploaded:
-    # -----------------------
-    # Load & Scale
-    # -----------------------
     df_file = load_gads_file_from_bytes(uploaded)
     data = df_file.values
     data_scaled = scaler.transform(data)
@@ -147,7 +131,7 @@ if uploaded:
         Y_scaled, scaler
     )
 
-    # Coordinates for plotting (store ALL true fields)
+    # Coordinates for plotting 
     coords = df_file.iloc[idx_seq][["X", "Y"]].copy()
     coords["True_RHO"] = rho_true_all
     coords["True_U"]   = u_true_all
@@ -312,7 +296,7 @@ if uploaded:
     # -----------------------
     # CSV DOWNLOAD
     # -----------------------
-    st.subheader("💾 Download All Predictions (All Models & This Field)")
+    st.subheader("Download All Predictions (All Models & This Field)")
 
     csv = coords.to_csv(index=False).encode()
     st.download_button(
@@ -332,7 +316,7 @@ if uploaded:
         index=0
     )
 
-    st.subheader(f"📉 Error Histogram – {field_to_analyze} | Model: {selected_model}")
+    st.subheader(f"Error Histogram – {field_to_analyze} | Model: {selected_model}")
 
     # Extract true & pred for selected model and field
     y_true_diag = coords["True_" + field_to_analyze].values
@@ -359,7 +343,7 @@ if uploaded:
     # ----------------------------------------------------
     # PARITY PLOT
     # ----------------------------------------------------
-    st.subheader(f"📌 Parity Plot – True vs Predicted ({field_to_analyze}) | Model: {selected_model}")
+    st.subheader(f"Parity Plot – True vs Predicted ({field_to_analyze}) | Model: {selected_model}")
 
     fig_p, ax_p = plt.subplots(figsize=(7, 7))
 
@@ -380,7 +364,7 @@ if uploaded:
     # STREAMLINES (U-V Velocity Field) FOR SELECTED MODEL
     # ----------------------------------------------------
     if field_to_analyze in ["U", "V"]:
-        st.subheader(f"🌪 Streamlines – Velocity Field Comparison | Model: {selected_model}")
+        st.subheader(f" Streamlines – Velocity Field Comparison | Model: {selected_model}")
 
         # Build 2D fields (true)
         ZU_true = coords.pivot(index="Y", columns="X", values="True_U").values
