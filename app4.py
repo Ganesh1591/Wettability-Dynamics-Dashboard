@@ -45,7 +45,7 @@ models = {
     "LST-Net":     model_lst
 }
 
-st.sidebar.success("✅ All models loaded successfully!")
+st.sidebar.success("All models loaded successfully!")
 
 # Field selection
 field_options = ["RHO", "U", "V", "P"]
